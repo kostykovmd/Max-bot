@@ -2,13 +2,15 @@ import asyncio
 import httpx
 import os
 import logging
+import sys
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("MAX_TOKEN")
 if not TOKEN:
-    raise RuntimeError("MAX_TOKEN не задан!")
+    logger.error("MAX_TOKEN не задан!")
+    sys.exit(1)
 
 BASE_URL = f"https://platform-api2.max.ru/bot{TOKEN}"
 
