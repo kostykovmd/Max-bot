@@ -17,7 +17,8 @@ BASE_URL = f"https://platform-api2.max.ru/bot{TOKEN}"
 async def send_message(chat_id, text):
     url = f"{BASE_URL}/sendMessage"
     try:
-        async with httpx.AsyncClient() as client:
+        # 👇 Добавлен verify=False
+        async with httpx.AsyncClient(verify=False) as client:
             await client.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
     except Exception as e:
         logger.error(f"Ошибка отправки: {e}")
@@ -44,7 +45,8 @@ async def main():
         url = f"{BASE_URL}/getUpdates"
         params = {"timeout": 30, "offset": offset} if offset else {"timeout": 30}
         try:
-            async with httpx.AsyncClient() as client:
+            # 👇 И здесь тоже verify=False
+            async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(url, params=params, timeout=60)
                 if resp.status_code == 200:
                     data = resp.json()
