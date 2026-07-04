@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from maxapi import Bot, Dispatcher, types
-from maxapi.types import MessageCreated, Command, CallbackQuery
+from maxapi.types import MessageCreated, Command
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -73,7 +73,7 @@ async def init_db():
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-# ---------- Вспомогательные функции для работы с БД ----------
+# ---------- Вспомогательные функции ----------
 async def get_user_by_max_id(max_user_id: str) -> Optional[User]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.max_user_id == max_user_id))
@@ -137,10 +137,10 @@ dp = Dispatcher()
 
 # ---------- Хранилище состояний (в памяти) ----------
 user_states: Dict[str, Dict[str, Any]] = {}
+reports_store: Dict[str, str] = {}
 
 # ---------- Вспомогательные функции для клавиатур ----------
 def make_inline_keyboard(buttons: list, row_width: int = 3):
-    """Создаёт InlineKeyboardMarkup из списка кнопок [(text, callback_data), ...]"""
     keyboard = []
     for i in range(0, len(buttons), row_width):
         row = []
@@ -150,7 +150,6 @@ def make_inline_keyboard(buttons: list, row_width: int = 3):
     return types.InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def main_menu_patient():
-    """Главное меню для пациента"""
     buttons = [
         ("📝 Новая запись", "new_record"),
         ("📋 История", "history"),
@@ -161,7 +160,6 @@ def main_menu_patient():
     return make_inline_keyboard(buttons, row_width=2)
 
 def main_menu_doctor():
-    """Главное меню для врача"""
     buttons = [
         ("👨‍⚕️ Пациенты", "patients"),
         ("🔍 Просмотр записей", "view_records"),
@@ -207,7 +205,7 @@ def cancel_keyboard():
     buttons = [("❌ Отмена", "cancel")]
     return make_inline_keyboard(buttons, row_width=1)
 
-# ---------- Отправка сообщений с меню ----------
+# ---------- Отправка главного меню ----------
 async def send_main_menu(event: MessageCreated, user: User):
     if user.role == 'patient':
         await event.message.answer(
@@ -268,29 +266,26 @@ async def cmd_register(event: MessageCreated):
     )
     await send_main_menu(event, user)
 
-# ---------- Обработчик callback-запросов ----------
+# ---------- Обработчик callback-запросов (без аннотации типа) ----------
 @dp.callback_query()
-async def handle_callback(callback: CallbackQuery):
+async def handle_callback(callback):  # не указываем тип, чтобы избежать ошибки импорта
     user_id = str(callback.from_.id)
     data = callback.data
 
-    # Обработка выхода из меню
     if data == "exit":
         await callback.answer("До свидания!")
         await callback.message.edit_text("👋 Вы вышли из главного меню. Для повторного входа отправьте /start")
         return
 
-    # Получаем пользователя из БД
     user = await get_user_by_max_id(user_id)
     if not user:
         await callback.answer("Пожалуйста, зарегистрируйтесь командой /register")
         await callback.message.edit_text("Пожалуйста, зарегистрируйтесь командой /register")
         return
 
-    # ---------- Действия для пациента ----------
+    # ---------- Действия пациента ----------
     if user.role == 'patient':
         if data == "new_record":
-            # Начинаем сбор данных
             user_states[user_id] = {'step': 'intensity', 'user_id': user.id}
             await callback.answer()
             await callback.message.edit_text(
@@ -316,7 +311,6 @@ async def handle_callback(callback: CallbackQuery):
                     )
                 await callback.answer()
                 await callback.message.edit_text(text[:4000], parse_mode="Markdown")
-                # Возвращаем главное меню
                 await callback.message.answer("Выберите действие:", reply_markup=main_menu_patient())
         elif data == "report":
             records = await get_patient_records(user.id, 100)
@@ -331,27 +325,22 @@ async def handle_callback(callback: CallbackQuery):
                     f"Лок.{r.location}, Хар.{r.character}, Лек.{r.medication}"
                     f"{', Комм.: '+r.comment if r.comment else ''}\n"
                 )
-            # Сохраняем отчёт в памяти для отправки
-            if 'reports' not in globals():
-                globals()['reports'] = {}
-            globals()['reports'][user_id] = report
+            reports_store[user_id] = report
             await callback.answer()
             await callback.message.edit_text(
                 "📄 Отчёт сгенерирован. Чтобы отправить врачу, нажмите кнопку ниже.",
                 reply_markup=make_inline_keyboard([("📤 Отправить врачу", "share_report")], row_width=1)
             )
         elif data == "share_report":
-            if 'reports' not in globals() or user_id not in globals()['reports']:
+            if user_id not in reports_store:
                 await callback.answer("Сначала сгенерируйте отчёт через /report")
                 return
-            report = globals()['reports'][user_id]
-            # Здесь можно реализовать отправку врачу (пока просто показываем)
+            report = reports_store[user_id]
             await callback.answer()
             await callback.message.edit_text(
                 "✅ Отчёт отправлен врачу (в демо-режиме).\n\n" + report[:1000],
                 parse_mode="Markdown"
             )
-            # Возвращаем меню
             await callback.message.answer("Выберите действие:", reply_markup=main_menu_patient())
         elif data == "comments":
             records = await get_patient_records(user.id, 20)
@@ -367,8 +356,6 @@ async def handle_callback(callback: CallbackQuery):
                     found = True
                     answer += f"📌 Запись от {rec.timestamp.strftime('%d.%m %H:%M')}:\n"
                     for c in comments:
-                        doctor = await get_user_by_max_id(str(c.doctor_id))  # но doctor_id - это id из БД, а не max_user_id, нужно доработать.
-                        # Пока просто выводим id
                         answer += f"  - {c.text} (врач {c.doctor_id})\n"
             if not found:
                 await callback.answer("Нет комментариев")
@@ -378,7 +365,7 @@ async def handle_callback(callback: CallbackQuery):
                 await callback.message.edit_text(answer[:4000], parse_mode="Markdown")
                 await callback.message.answer("Выберите действие:", reply_markup=main_menu_patient())
 
-    # ---------- Действия для врача ----------
+    # ---------- Действия врача ----------
     elif user.role == 'doctor':
         if data == "patients":
             patients = await get_all_patients()
@@ -393,7 +380,6 @@ async def handle_callback(callback: CallbackQuery):
             await callback.message.edit_text(text[:4000], parse_mode="Markdown")
             await callback.message.answer("Выберите действие:", reply_markup=main_menu_doctor())
         elif data == "view_records":
-            # Попросить ввести ID пациента (можно через отдельный callback или просто текстом)
             await callback.answer()
             await callback.message.edit_text(
                 "Введите ID пациента, чьи записи хотите просмотреть.\n"
@@ -407,7 +393,7 @@ async def handle_callback(callback: CallbackQuery):
                 "Например: `/comment 12 Отличная динамика!`"
             )
 
-    # ---------- Обработка шагов создания записи (через callback) ----------
+    # ---------- Обработка шагов создания записи ----------
     if data.startswith("intensity_"):
         intensity = int(data.split("_")[1])
         if user_id not in user_states:
@@ -472,7 +458,6 @@ async def handle_callback(callback: CallbackQuery):
         if user_id not in user_states or user_states[user_id].get('step') != 'comment':
             await callback.answer("Ошибка. Начните заново.")
             return
-        # Сохраняем запись без комментария
         state = user_states[user_id]
         record = await add_pain_record(
             user_id=state['user_id'],
@@ -500,12 +485,11 @@ async def handle_callback(callback: CallbackQuery):
             del user_states[user_id]
         await callback.answer("Действие отменено")
         await callback.message.edit_text("❌ Действие отменено.")
-        # Возвращаем меню
         user = await get_user_by_max_id(user_id)
         if user:
             await callback.message.answer("Выберите действие:", reply_markup=main_menu_patient() if user.role == 'patient' else main_menu_doctor())
 
-# ---------- Обработчик текстовых сообщений (для ввода комментария и команд) ----------
+# ---------- Обработчик текстовых сообщений (для комментариев и команд) ----------
 @dp.message_created()
 async def handle_text(event: MessageCreated):
     user_id = str(event.message.from_.id)
@@ -514,7 +498,6 @@ async def handle_text(event: MessageCreated):
     # Если пользователь в процессе ввода комментария
     if user_id in user_states and user_states[user_id].get('step') == 'comment':
         state = user_states[user_id]
-        # Сохраняем запись с комментарием
         record = await add_pain_record(
             user_id=state['user_id'],
             intensity=state['intensity'],
@@ -533,29 +516,78 @@ async def handle_text(event: MessageCreated):
             f"Комментарий: {text}",
             parse_mode="Markdown"
         )
-        # Возвращаем меню
         user = await get_user_by_max_id(user_id)
         if user:
             await send_main_menu(event, user)
         return
 
-    # Обработка команд, если пользователь не в процессе ввода
-    if text.startswith('/'):
-        # Команды обрабатываются декораторами, но мы можем здесь просто пропустить
-        return
+    # Обработка команд /view и /comment (врач)
+    if text.startswith('/view'):
+        parts = text.split()
+        if len(parts) < 2:
+            await event.message.answer("Укажите ID пациента: /view <id>")
+            return
+        try:
+            patient_id = int(parts[1])
+        except ValueError:
+            await event.message.answer("ID должен быть числом.")
+            return
+        user = await get_user_by_max_id(user_id)
+        if not user or user.role != 'doctor':
+            await event.message.answer("Только для врачей.")
+            return
+        async with AsyncSessionLocal() as session:
+            patient = await session.get(User, patient_id)
+            if not patient or patient.role != 'patient':
+                await event.message.answer("Пациент не найден.")
+                return
+            records = await get_patient_records(patient_id, 20)
+            if not records:
+                await event.message.answer("У пациента нет записей.")
+                return
+            answer = f"📋 Записи пациента {patient.full_name or patient.max_user_id}:\n\n"
+            for r in records:
+                answer += (
+                    f"ID записи: {r.id} | {r.timestamp.strftime('%d.%m %H:%M')}\n"
+                    f"Инт.: {r.intensity}, Лок.: {r.location}, Хар.: {r.character}, Лек.: {r.medication}\n"
+                    f"Комм. пациента: {r.comment or 'нет'}\n"
+                    f"Комментарии врача: "
+                )
+                comments = await get_comments_for_record(r.id)
+                if comments:
+                    for c in comments:
+                        answer += f"[{c.timestamp.strftime('%H:%M')}] {c.text}; "
+                else:
+                    answer += "нет"
+                answer += "\n\n"
+            await event.message.answer(answer[:4000])
 
-    # Если пользователь отправил текст, а мы не в процессе, просим использовать меню
-    user = await get_user_by_max_id(user_id)
-    if user:
-        await event.message.answer(
-            "Пожалуйста, используйте кнопки меню или команды /start, /register.",
-            reply_markup=main_menu_patient() if user.role == 'patient' else main_menu_doctor()
-        )
+    elif text.startswith('/comment'):
+        parts = text.split(maxsplit=2)
+        if len(parts) < 3:
+            await event.message.answer("Используйте: /comment <id_записи> <текст комментария>")
+            return
+        try:
+            record_id = int(parts[1])
+        except ValueError:
+            await event.message.answer("ID записи должен быть числом.")
+            return
+        comment_text = parts[2]
+        user = await get_user_by_max_id(user_id)
+        if not user or user.role != 'doctor':
+            await event.message.answer("Только для врачей.")
+            return
+        async with AsyncSessionLocal() as session:
+            record = await session.get(PainRecord, record_id)
+            if not record:
+                await event.message.answer("Запись не найдена.")
+                return
+            await add_comment(record_id, user.id, comment_text)
+            await event.message.answer(f"✅ Комментарий к записи {record_id} добавлен.")
 
-# ---------- Запуск бота ----------
+# ---------- Запуск ----------
 async def main():
     await init_db()
-    # Удаляем старый вебхук
     await bot.delete_webhook()
     await dp.start_polling(bot)
 
