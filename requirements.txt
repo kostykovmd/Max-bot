@@ -1,1 +1,1 @@
-maxapi[webhook]
+maxapi
