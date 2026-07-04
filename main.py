@@ -5,10 +5,9 @@ import os
 from maxapi import Bot, Dispatcher
 from maxapi.types import MessageCreated, Command
 
-# Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
-# Токен и секрет – берём из переменных окружения
+# ---- Переменные окружения ----
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
@@ -17,14 +16,19 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 if not WEBHOOK_SECRET:
     raise ValueError("WEBHOOK_SECRET не задан!")
 
+# ВАЖНО: добавьте эту переменную в Bothost
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+if not WEBHOOK_URL:
+    raise ValueError("WEBHOOK_URL не задан!")
+
+# ---- Инициализация ----
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище данных пользователей (в памяти, для теста)
+# Хранилище (в памяти, для теста)
 user_data = {}
 
-# ---------- Обработчики команд ----------
-
+# ---- Обработчики ----
 @dp.message_created(Command('start'))
 async def cmd_start(event: MessageCreated):
     await event.message.answer(
@@ -45,18 +49,16 @@ async def cmd_help(event: MessageCreated):
 @dp.message_created(Command('new'))
 async def cmd_new(event: MessageCreated):
     user_id = event.message.from_.id
-    # Начинаем опрос
     user_data[user_id] = {'step': 'intensity'}
     await event.message.answer(
         "Оцените интенсивность боли по шкале от 0 до 10 (числом):"
     )
 
-# Обработчик всех текстовых сообщений (для пошагового сбора)
 @dp.message_created()
 async def handle_text(event: MessageCreated):
     user_id = event.message.from_.id
     if user_id not in user_data:
-        return  # не в процессе ввода
+        return
 
     step = user_data[user_id].get('step')
     text = event.message.text.strip()
@@ -85,7 +87,6 @@ async def handle_text(event: MessageCreated):
 
     elif step == 'medication':
         user_data[user_id]['medication'] = text
-        # Сохраняем запись
         record = {
             'intensity': user_data[user_id].get('intensity'),
             'location': user_data[user_id].get('location'),
@@ -95,8 +96,6 @@ async def handle_text(event: MessageCreated):
         if 'records' not in user_data[user_id]:
             user_data[user_id]['records'] = []
         user_data[user_id]['records'].append(record)
-
-        # Очищаем состояние
         del user_data[user_id]
 
         await event.message.answer(
@@ -114,7 +113,7 @@ async def cmd_history(event: MessageCreated):
         await event.message.answer("У вас пока нет записей. Добавьте через /new.")
         return
 
-    records = user_data[user_id]['records'][-5:]  # последние 5
+    records = user_data[user_id]['records'][-5:]
     answer = "📊 Ваши последние записи:\n\n"
     for i, rec in enumerate(reversed(records), 1):
         answer += (
@@ -125,17 +124,20 @@ async def cmd_history(event: MessageCreated):
         )
     await event.message.answer(answer)
 
-# ---------- Запуск через вебхук ----------
+# ---- Запуск ----
 async def main():
-    # На случай, если остался старый вебхук
+    # 1. Удаляем старый вебхук
     await bot.delete_webhook()
-    # Запускаем веб-сервер, который будет принимать POST-запросы от MAX
-    # Секрет будет проверяться автоматически в каждом запросе
+
+    # 2. Регистрируем новый вебхук с секретом
+    await bot.set_webhook(url=WEBHOOK_URL, secret=WEBHOOK_SECRET)
+
+    # 3. Запускаем сервер для приёма POST-запросов от MAX
     await dp.handle_webhook(
         bot=bot,
-        host='0.0.0.0',                     # слушаем все интерфейсы
-        port=int(os.getenv("PORT", 8080)), # порт, который использует Bothost
-        secret=WEBHOOK_SECRET,             # передаём секрет для проверки
+        host='0.0.0.0',
+        port=int(os.getenv("PORT", 8080)),
+        secret=WEBHOOK_SECRET,
         log_level='info'
     )
 
