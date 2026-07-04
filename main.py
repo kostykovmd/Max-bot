@@ -7,28 +7,17 @@ from maxapi.types import MessageCreated, Command
 
 logging.basicConfig(level=logging.INFO)
 
-# ---- Переменные окружения ----
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-if not WEBHOOK_SECRET:
-    raise ValueError("WEBHOOK_SECRET не задан!")
-
-# ВАЖНО: добавьте эту переменную в Bothost
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL не задан!")
-
-# ---- Инициализация ----
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище (в памяти, для теста)
+# Хранилище данных (в памяти)
 user_data = {}
 
-# ---- Обработчики ----
+# ---------- Обработчики ----------
 @dp.message_created(Command('start'))
 async def cmd_start(event: MessageCreated):
     await event.message.answer(
@@ -124,22 +113,12 @@ async def cmd_history(event: MessageCreated):
         )
     await event.message.answer(answer)
 
-# ---- Запуск ----
+# ---------- Запуск через Long Polling ----------
 async def main():
-    # 1. Удаляем старый вебхук
+    # Удаляем старый вебхук, если был
     await bot.delete_webhook()
-
-    # 2. Регистрируем новый вебхук с секретом
-    await bot.set_webhook(url=WEBHOOK_URL, secret=WEBHOOK_SECRET)
-
-    # 3. Запускаем сервер для приёма POST-запросов от MAX
-    await dp.handle_webhook(
-        bot=bot,
-        host='0.0.0.0',
-        port=int(os.getenv("PORT", 8080)),
-        secret=WEBHOOK_SECRET,
-        log_level='info'
-    )
+    # Запускаем длинный опрос (не требует публичного URL и секретов)
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
     asyncio.run(main())
