@@ -172,7 +172,8 @@ async def send_main_menu(event: MessageCreated, user):
 # ---------- Обработчики команд ----------
 @dp.message_created(Command('start'))
 async def cmd_start(event: MessageCreated):
-    user = await get_user_by_max_id(str(event.message.from_.id))
+    max_id = str(event.message.chat.id)  # Исправлено: from_ -> chat.id
+    user = await get_user_by_max_id(max_id)
     if user:
         await event.message.answer(f"👋 С возвращением, {user['full_name'] or 'пользователь'}!")
         await send_main_menu(event, user)
@@ -187,7 +188,7 @@ async def cmd_start(event: MessageCreated):
 
 @dp.message_created(Command('register'))
 async def cmd_register(event: MessageCreated):
-    max_id = str(event.message.from_.id)
+    max_id = str(event.message.chat.id)  # Исправлено: from_ -> chat.id
     if await get_user_by_max_id(max_id):
         await event.message.answer("Вы уже зарегистрированы.")
         return
@@ -209,7 +210,7 @@ async def cmd_register(event: MessageCreated):
 # ---------- Основной обработчик всех текстовых сообщений ----------
 @dp.message_created()
 async def handle_text(event: MessageCreated):
-    user_id = str(event.message.from_.id)
+    user_id = str(event.message.chat.id)  # Исправлено: from_ -> chat.id
     text = event.message.text.strip()
     user = await get_user_by_max_id(user_id)
     if not user:
