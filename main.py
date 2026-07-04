@@ -7,8 +7,7 @@ from typing import Optional, Dict, Any
 from maxapi import Bot, Dispatcher, types
 from maxapi.types import MessageCreated, Command
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker as async_sessionmaker
 from sqlalchemy.future import select
@@ -32,7 +31,7 @@ if DATABASE_URL.startswith("postgres://"):
 elif "sqlite://" in DATABASE_URL and "sqlite+aiosqlite" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://")
 
-# ---------- Модели БД ----------
+# ---------- Модели БД (исправленный declarative_base) ----------
 Base = declarative_base()
 
 class User(Base):
@@ -266,9 +265,9 @@ async def cmd_register(event: MessageCreated):
     )
     await send_main_menu(event, user)
 
-# ---------- Обработчик callback-запросов (без аннотации типа) ----------
-@dp.callback_query()
-async def handle_callback(callback):  # не указываем тип, чтобы избежать ошибки импорта
+# ---------- Обработчик callback-запросов (правильный декоратор) ----------
+@dp.callback()  # Исправлено: вместо callback_query используем callback
+async def handle_callback(callback):
     user_id = str(callback.from_.id)
     data = callback.data
 
@@ -489,7 +488,7 @@ async def handle_callback(callback):  # не указываем тип, чтоб
         if user:
             await callback.message.answer("Выберите действие:", reply_markup=main_menu_patient() if user.role == 'patient' else main_menu_doctor())
 
-# ---------- Обработчик текстовых сообщений (для комментариев и команд) ----------
+# ---------- Обработчик текстовых сообщений ----------
 @dp.message_created()
 async def handle_text(event: MessageCreated):
     user_id = str(event.message.from_.id)
@@ -521,7 +520,7 @@ async def handle_text(event: MessageCreated):
             await send_main_menu(event, user)
         return
 
-    # Обработка команд /view и /comment (врач)
+    # Обработка команд врача /view и /comment
     if text.startswith('/view'):
         parts = text.split()
         if len(parts) < 2:
