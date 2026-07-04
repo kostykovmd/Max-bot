@@ -1,4 +1,2 @@
 maxapi
-sqlalchemy
-asyncpg
 aiosqlite
