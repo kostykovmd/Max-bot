@@ -1,1 +1,3 @@
 maxapi
+sqlalchemy
+asyncpg
